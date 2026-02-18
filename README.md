@@ -17,7 +17,7 @@ SOURCE ──────────► SUMMARY ──────────�
 
 CodeQL ships with models for hundreds of popular frameworks — Flask, Django, SQLAlchemy, etc. **But when your code uses a framework CodeQL has never seen, it can't trace anything.** No model = no findings.
 
-This demo uses a **fictional framework called "QuickAPI"** (in the `quickapi/` folder) to simulate that exact scenario. The app has 9 obvious security bugs, but CodeQL finds **zero** of them out of the box.
+This demo uses a **fictional framework called "QuickAPI"** (in the `quickapi/` folder) to simulate that exact scenario. The app has 6 security bugs, but CodeQL finds **zero** of them out of the box.
 
 ---
 
@@ -35,7 +35,7 @@ model-editor-demo/
 │
 ├── app/
 │   ├── main.py                            App entry point & route wiring
-│   └── views.py                           ★ 9 intentional vulnerabilities ★
+│   └── views.py                           ★ 5 intentional + 1 bonus vulnerability ★
 │
 └── README.md                              ← You are here
 ```
@@ -200,7 +200,7 @@ codeql database analyze codeql-db \
   --rerun
 ```
 
-**Result: All 9 vulnerabilities are now detected!**
+**Result: All 6 vulnerabilities are now detected!**
 
 
 ---
@@ -228,35 +228,33 @@ If time allows, let the audience model the remaining APIs themselves. Here's the
 
 | Method | Input | Kind |
 |--------|-------|------|
-| `DatabaseConnection.execute_query()` | `Argument[0]` | `sql-injection` |
-| `DatabaseConnection.execute_update()` | `Argument[0]` | `sql-injection` |
-| `DatabaseConnection.execute_raw()` | `Argument[0]` | `sql-injection` |
-| `SystemHelper.run_command()` | `Argument[0]` | `command-injection` |
-| `SystemHelper.ping_host()` | `Argument[0]` | `command-injection` |
-| `SystemHelper.read_file()` | `Argument[0]` | `path-injection` |
-| `SystemHelper.write_log()` | `Argument[1]` ⚠️ | `log-injection` |
-| `TemplateEngine.render_string()` | `Argument[0]` | `html-injection` |
-| `Response.redirect()` | `Argument[0]` | `url-redirection` |
+| `DatabaseConnection.execute_query()` | `Argument[0,sql:]` | `sql-injection` |
+| `DatabaseConnection.execute_update()` | `Argument[0,sql:]` | `sql-injection` |
+| `DatabaseConnection.execute_raw()` | `Argument[0,sql:]` | `sql-injection` |
+| `SystemHelper.run_command()` | `Argument[0,cmd:]` | `command-injection` |
+| `SystemHelper.ping_host()` | `Argument[0,hostname:]` | `command-injection` |
+| `SystemHelper.read_file()` | `Argument[0,filepath:]` | `path-injection` |
+| `Response.redirect()` | `Argument[0,url:]` | `url-redirection` |
 
-> ⚠️ Note: `write_log(logfile, message)` — the sink is the **second** argument (the message), not the first.
+> 💡 Note: The `Argument[0,sql:]` syntax includes both the positional index and the Python parameter name. The model editor generates this format automatically.
 
 #### All summaries (Model Type: Flow summary, Kind: taint)
 
 | Method | Input | Output |
 |--------|-------|--------|
-| `Sanitizer.strip_tags()` | `Argument[0]` | `ReturnValue` |
-| `Sanitizer.truncate()` | `Argument[0]` | `ReturnValue` |
-| `Sanitizer.to_lowercase()` | `Argument[0]` | `ReturnValue` |
-| `DataTransformer.to_json()` | `Argument[0]` | `ReturnValue` |
-| `DataTransformer.from_json()` | `Argument[0]` | `ReturnValue` |
-| `DataTransformer.format_string()` | `Argument[0]` | `ReturnValue` |
-| `DataTransformer.join_strings()` | `Argument[0]` | `ReturnValue` |
+| `Sanitizer.strip_tags()` | `Argument[0,html:]` | `ReturnValue` |
+| `Sanitizer.truncate()` | `Argument[0,value:]` | `ReturnValue` |
+| `Sanitizer.to_lowercase()` | `Argument[0,value:]` | `ReturnValue` |
+| `DataTransformer.to_json()` | `Argument[0,data:]` | `ReturnValue` |
+| `DataTransformer.from_json()` | `Argument[0,json_str:]` | `ReturnValue` |
+| `DataTransformer.format_string()` | `Argument[0,template:]` | `ReturnValue` |
+| `DataTransformer.join_strings()` | `Argument[0,parts:]` | `ReturnValue` |
 
 #### Answer key
 
 The complete model file is at:
 ```
-.github/codeql/extensions/model-editor-demo-python/models/quickapi-complete-reference.model.yml
+.github/codeql/extensions/codeql-db-python/models/quickapi.model.yml
 ```
 
 #### Save and run the analysis
@@ -278,28 +276,25 @@ codeql database analyze codeql-db \
   --output=after-modeling-results.sarif \
   --additional-packs=.github/codeql/extensions/ \
   --model-packs=pack/codeql-db-python \
-  -- python-security-and-quality
+
 ```
 
-**Result: All 9 vulnerabilities are now detected!**
+**Result: All 6 vulnerabilities are now detected!**
 
 ---
 
-## All 9 vulnerabilities
+## All 6 vulnerabilities
 
 After modeling everything, CodeQL should detect all of these:
 
 | # | Vulnerability | Taint path | What needs to be modeled |
 |---|--------------|-----------|------------------------|
 | 1 | **SQL Injection** | `get_query_param()` → f-string → `execute_query()` | source + sink |
-| 2 | **SQL Injection (builder)** | `get_query_param()` → `where_raw()` → `build()` → `execute_query()` | source + sink + summary |
-| 3 | **Reflected XSS** | `get_query_param()` → `render_string()` | source + sink |
-| 4 | **Command Injection** | `get_query_param()` → `ping_host()` | source + sink |
-| 5 | **Path Traversal** | `get_query_param()` → `read_file()` | source + sink |
-| 6 | **SQL Injection (sanitizer bypass)** | `get_json_body()` → `strip_tags()` → `execute_update()` | source + sink + summary |
-| 7 | **SQL Injection (JWT claims)** | `get_header()` → `decode_token()` → `execute_query()` | source + source + sink |
-| 8 | **Command Injection (transformer)** | `get_query_param()` → `format_string()` → `run_command()` | source + sink + summary |
-| 9 | **Log Injection** | `get_query_param()` → `write_log()` | source + sink |
+| 2 | **Command Injection** | `get_query_param()` → `ping_host()` | source + sink |
+| 3 | **Path Traversal** | `get_query_param()` → `read_file()` | source + sink |
+| 4 | **SQL Injection (sanitizer bypass)** | `get_json_body()` → `strip_tags()` → `execute_update()` | source + sink + summary |
+| 5 | **SQL Injection (JWT claims)** | `get_header()` → `decode_token()` → `execute_query()` | source + source + sink |
+| 6 | **Polynomial ReDoS** | `get_json_body()` → `strip_tags()` regex | source + summary (CodeQL detects the vulnerable regex automatically once taint reaches it) |
 
 ---
 
@@ -323,24 +318,25 @@ extensions:
       pack: codeql/python-all
       extensible: sourceModel
     data:
-      - ["quickapi.request.Request", "Member[get_query_param].ReturnValue", "remote"]
+      - ["quickapi.request.Request","Member[get_query_param].ReturnValue","remote"]
 
   # Sink: marks arguments as security-sensitive
+  #   Argument[0,sql:] = positional index 0, Python parameter name "sql"
   - addsTo:
       pack: codeql/python-all
       extensible: sinkModel
     data:
-      - ["quickapi.database.DatabaseConnection", "Member[execute_query].Argument[0]", "sql-injection"]
+      - ["quickapi.database.DatabaseConnection","Member[execute_query].Argument[0,sql:]","sql-injection"]
 
   # Summary: marks taint flow through a function
   - addsTo:
       pack: codeql/python-all
       extensible: summaryModel
     data:
-      - ["quickapi.security.Sanitizer!", "Member[strip_tags]", "Argument[0]", "ReturnValue", "taint"]
+      - ["quickapi.security.Sanitizer","Member[strip_tags]","Argument[0,html:]","ReturnValue","taint"]
 ```
 
-> **Note:** The `!` suffix on `Sanitizer!` means "the class itself" (for static methods) rather than "instances of the class."
+> **Note:** The model editor includes the Python parameter name in the `Argument` spec (e.g., `Argument[0,sql:]`). This matches both positional and keyword argument usage.
 
 ---
 
